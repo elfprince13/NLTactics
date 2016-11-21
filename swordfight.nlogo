@@ -1,7 +1,10 @@
 extensions [bmpsprites burlap]
-breed [ zealots zealot ]
+breed [ good-zealots good-zealot ]
+breed [ bad-zealots bad-zealot ]
 
-zealots-own [frame health team enemy state]        ;; ranges from 1 to 9
+
+good-zealots-own [frame health team enemies enemy state]        ;; ranges from 1 to 9
+bad-zealots-own [frame health team enemy state]        ;; ranges from 1 to 9
 globals [walk-sequence sprites-table-w attack-sequence sprites-table-a death-sequence sprites-table-d HOLD MOVE ATTACK DEATH]
 
 ;;
@@ -12,30 +15,60 @@ to-report name-agent
   report but-last but-first (word self)
 end
 
-to test-burlap
-  setup
+to do-burlap
+  let numguys 2
+  let maxhealth 4
+  setup-simple numguys maxhealth
   burlap:create-domain "sword"
   burlap:set-name-dependence "sword" true
-  burlap:expose-agent-class "sword" "zealot" false
-  burlap:expose-own-attr "sword" "zealot" "xcor" (task xcor) (task [set xcor ?]) burlap:attr:REAL
-  burlap:expose-own-attr "sword" "zealot" "ycor" (task ycor) (task [set ycor ?]) burlap:attr:REAL
-  burlap:expose-own-attr "sword" "zealot" "state" (task state) (task [set state ?]) burlap:attr:DISC
-  burlap:expose-own-attr "sword" "zealot" "enemies" (task [zealots with [team != ([team] of myself)]]) (task [show ?]) burlap:attr:MULTITARGETRELATIONAL
-  burlap:set-attr-range:REAL "sword" "xcor" (list min-pxcor max-pxcor)
-  burlap:set-attr-range:REAL "sword" "ycor" (list min-pycor max-pycor)
-  burlap:set-attr-range:DISC "sword" "state" (list HOLD MOVE ATTACK DEATH)
+  burlap:expose-agent-class "sword" "bad-zealot" false
+  burlap:expose-agent-class "sword" "good-zealot" false
+  burlap:expose-own-attr "sword" "bad-zealot" "enemy" (task enemy) (task [set enemy enemy]) burlap:attr:RELATIONAL
+  burlap:expose-own-attr "sword" "bad-zealot" "health" (task [(WORD round health)]) (task [set health read-from-string ?]) burlap:attr:DISC
+  burlap:expose-shared-attr "sword" "good-zealot" "health"
+  burlap:expose-shared-attr "sword" "good-zealot" "enemy"
+  burlap:expose-own-attr "sword" "good-zealot" "enemies" (task bad-zealots) (task [set enemies bad-zealots]) burlap:attr:MULTITARGETRELATIONAL
+  burlap:set-attr-range:DISC "sword" "health" n-values (1 + maxhealth) [(WORD ?)]
+  
+  burlap:set-class-based-rewards "sword" (list "good-zealot" "bad-zealot") (list (task 0) (task [ifelse-value (state = DEATH) [10][0]]))
+  let terminaltask (task [(0 = count (good-zealots with [health != 0])) or (0 = count (bad-zealots with [health != 0]))])
+  burlap:set-terminal-function "sword" terminaltask
+  let goodtask (task [simple-attack ?1])
+  let badtask (task [simple-attack enemy])
+  ;show (SENTENCE (sort ([name-agent] of good-zealots)) (sort ([name-agent] of bad-zealots)))
+  burlap:add-deterministic-composite-action "sword" "attack" (SENTENCE (sort ([name-agent] of good-zealots)) (sort ([name-agent] of bad-zealots))) (SENTENCE (n-values numguys [goodtask]) (n-values numguys [badtask]) ) (SENTENCE (n-values numguys ["bad-zealot"]) (n-values numguys [""])) (SENTENCE (n-values numguys [sort ([name-agent] of bad-zealots)]) (n-values numguys [[""]]))
+  
+  ;; POINTERS DO NOT SURVIVE state-reloading
+  ;let goodguy one-of good-zealots
+  
   let startstate burlap:capture-current-state "sword"
-  show (WORD (burlap:evaluate-attribute-in-state startstate ([name-agent] of zealot 0) "xcor") " " (burlap:evaluate-attribute-in-state startstate ([name-agent] of zealot 0) "ycor"))
-  repeat 60 [
-    if (count zealots with [team = 1 and state != DEATH]) > 0 and (count zealots with [team = 2 and state != DEATH]) > 0[
-      go
+  show (WORD (burlap:evaluate-attribute-in-state startstate ([name-agent] of good-zealot 0) "health") " " (burlap:evaluate-attribute-in-state startstate ([name-agent] of good-zealot 0) "enemies"))
+  repeat 20 [
+    ;show count good-zealots with [state != DEATH]
+    ;show count bad-zealots with [state != DEATH]
+    ;show "moo"
+    if (count good-zealots with [state != DEATH]) > 0 and (count bad-zealots with [state != DEATH]) > 0[
+      go-simple
       let thisstate burlap:capture-current-state "sword"
-      show (WORD (burlap:evaluate-attribute-in-state thisstate ([name-agent] of zealot 0) "xcor") " " (burlap:evaluate-attribute-in-state thisstate ([name-agent] of zealot 0) "ycor"))
+      show (WORD (burlap:evaluate-attribute-in-state thisstate ([name-agent] of good-zealot 0) "health") " " (burlap:evaluate-attribute-in-state thisstate ([name-agent] of good-zealot 0) "enemies"))
     ]
   ]
   burlap:return-to-state "sword" startstate
   let thisstate burlap:capture-current-state "sword"
-  show (WORD (burlap:evaluate-attribute-in-state thisstate ([name-agent] of zealot 0) "xcor") " " (burlap:evaluate-attribute-in-state thisstate ([name-agent] of zealot 0) "ycor"))
+  show (WORD (burlap:evaluate-attribute-in-state thisstate ([name-agent] of good-zealot 0) "health") " " (burlap:evaluate-attribute-in-state thisstate ([name-agent] of good-zealot 0) "enemies"))
+  ;let qpolicy burlap:try-qlearning "sword" 0.95 0.001 1000 thisstate
+  let qpolicy burlap:get-modeled-greedyq numguys 0 maxhealth
+  while [not (runresult terminaltask)][
+    show runresult terminaltask
+    ask good-zealots [show (SENTENCE health)]
+    ask bad-zealots [show (SENTENCE health)]
+    set thisstate burlap:consult-policy "sword" qpolicy thisstate false
+    ;show (WORD (burlap:evaluate-attribute-in-state thisstate ([name-agent] of good-zealot 0) "health") " " (burlap:evaluate-attribute-in-state thisstate ([name-agent] of good-zealot 0) "enemies"))
+  ]
+  ask good-zealots [show (SENTENCE health)]
+  ask bad-zealots [show (SENTENCE health)]
+    
+  
   burlap:destroy-domain "sword"
 end
 
@@ -70,6 +103,41 @@ to draw-sprite-from-heading
   ]
 end
 
+to setup-simple [n h]               ;; executed when we press the SETUP button
+  clear-all                       ;; clear all patches and turtles
+  
+  set HOLD 0
+  set MOVE 1
+  set ATTACK 2
+  set DEATH 3
+  
+  create-good-zealots n [
+    set xcor (max-pxcor - min-pxcor) / 2 + min-pxcor
+    set ycor (max-pycor - min-pycor) / 2 + min-pycor
+    set enemies bad-zealots
+    set health h
+    set state ATTACK
+    set team 1
+    update-color
+  ]
+  create-bad-zealots n [
+    set xcor (max-pxcor - min-pxcor) / 2 + min-pxcor
+    set ycor (max-pycor - min-pycor) / 2 + min-pycor
+    set enemy one-of good-zealots with [0 = count (bad-zealots with [enemy = myself])]
+    set health h
+    set state ATTACK
+    set team 2
+    update-color
+  ]
+  
+  ask good-zealots [
+    set enemy one-of bad-zealots with [enemy = myself]
+  ]
+  
+  ask patches [set pcolor green + 2]
+  reset-ticks
+end
+
 to setup                          ;; executed when we press the SETUP button
   clear-all                       ;; clear all patches and turtles
   
@@ -85,14 +153,28 @@ to setup                          ;; executed when we press the SETUP button
   set sprites-table-w n-values ((length walk-sequence) * 17) [bmpsprites:get-indexed-sprite-with-chroma "zealot" (85 + ?) [1 0 1]]
   set sprites-table-a n-values ((length attack-sequence) * 17) [bmpsprites:get-indexed-sprite-with-chroma "zealot" (0 + ?) [1 0 1]]
   set sprites-table-d n-values (length death-sequence) [bmpsprites:get-indexed-sprite-with-chroma "zealot" (221 + ?) [1 0 1]]
-  create-zealots (15 + (random 15)) [
+  create-good-zealots (15 + (random 15)) [
     
     set heading round-heading (random 360)                ;; i.e. to the right
     set frame 0
     set state HOLD
-    ;set shape "person-1"
     set health 10
-    set team one-of [1 2]
+    set team 1
+    update-color
+    set xcor (random (max-pxcor - min-pxcor)) + min-pxcor
+    set ycor (random (max-pycor - min-pycor)) + min-pycor
+    set enemy nobody
+    set size 1
+    set hidden? true
+    draw-sprite-from-heading
+  ]
+  create-good-zealots (15 + (random 15)) [
+    
+    set heading round-heading (random 360)                ;; i.e. to the right
+    set frame 0
+    set state HOLD
+    set health 10
+    set team 2
     update-color
     set xcor (random (max-pxcor - min-pxcor)) + min-pxcor
     set ycor (random (max-pycor - min-pycor)) + min-pycor
@@ -116,18 +198,51 @@ to go
   tick
 end
 
+to go-simple
+  animate-simple
+  do-attacks
+  tick
+end
+
 to animate
-  ask zealots [
+  ask good-zealots [
+    move-zealot
+    draw-sprite-from-heading
+  ]
+  ask bad-zealots [
     move-zealot
     draw-sprite-from-heading
   ]
 end
 
+to animate-simple
+  ask good-zealots [
+    move-zealot-simple
+  ]
+  ask bad-zealots [
+    move-zealot-simple
+  ]
+end
+
 to do-attacks
-  ask zealots [
+  ask bad-zealots [
    if (enemy != nobody) and (distance enemy) <= 2 and (frame = 0) and (state = ATTACK) and ([state] of enemy) != DEATH [
      ask enemy [
-       set health max (list 0 (health - 0.5))
+       set health max (list 0 (health - 1))
+       update-color
+       if health <= 0 [
+         set state DEATH
+         set frame -1
+       ]
+     ]
+   ] 
+  ]
+  
+  ; here we will need to process our policy
+  ask good-zealots [
+   if (enemy != nobody) and (distance enemy) <= 2 and (frame = 0) and (state = ATTACK) and ([state] of enemy) != DEATH [
+     ask enemy [
+       set health max (list 0 (health - 1))
        update-color
        if health <= 0 [
          set state DEATH
@@ -148,7 +263,7 @@ to move-zealot
   ifelse state != DEATH [
     if enemy = nobody or ([state] of enemy) = DEATH [
       ask my-out-links [die]
-      set enemy one-of zealots with [state != DEATH and team != ([team] of myself)]
+      set enemy one-of turtles with [state != DEATH and team != ([team] of myself)]
       if (enemy != nobody) [create-link-to enemy [set color ([color] of myself)]]
     ]
     
@@ -182,21 +297,51 @@ to move-zealot
   ]
 end
 
+to simple-attack [target]
+  if state != DEATH [
+    ask target [
+      set health max (list 0 (health - 1))
+    ]
+  ]
+end
+
+to move-zealot-simple
+  ifelse state != DEATH [
+    if enemy = nobody or ([state] of enemy) = DEATH [
+      ask my-out-links [die]
+      set enemy one-of turtles with [state != DEATH and team != ([team] of myself)]
+      if (enemy != nobody) [create-link-to enemy [set color ([color] of myself)]]
+    ]
+    
+    ifelse (enemy != nobody)  [
+      set state ATTACK
+      set frame 0          ;; go back to beginning of cycle of animation frames
+        
+    ] [
+      set state HOLD
+      set frame 0
+      
+    ]
+  ][
+    set frame -1
+  ]
+end
+
 to vis-squares
   ask turtles [set hidden? true ask patch round xcor round ycor [set pcolor red]]
   ask turtle 0 [set hidden? true ask patch round xcor round ycor [set pcolor blue]]  
 end
 @#$#@#$#@
 GRAPHICS-WINDOW
-201
+189
+14
+724
+570
+0
+0
+525.0
+1
 10
-1827
-697
-50
-20
-16.0
-1
-10
 1
 1
 1
@@ -204,10 +349,10 @@ GRAPHICS-WINDOW
 0
 0
 1
--50
-50
--20
-20
+0
+0
+0
+0
 1
 1
 1
@@ -237,7 +382,7 @@ BUTTON
 175
 73
 go
-if (count zealots with [team = 1]) > 0 and (count zealots with [team = 2]) > 0[\ngo\n]
+if (count bad-zealots) > 0 and (count good-zealots) > 0[\ngo\n]
 T
 1
 T
@@ -270,8 +415,8 @@ BUTTON
 180
 170
 213
-NIL
-follow zealot 0
+Follow Goodguy
+follow one-of good-zealots
 NIL
 1
 T
