@@ -1,0 +1,6 @@
+[submodule "NLBitmapSprites"]
+	path = NLBitmapSprites
+	url = https://github.com/elfprince13/NLBitmapSprites
+[submodule "NLBurlap"]
+	path = NLBurlap
+	url = https://github.com/elfprince13/NLBurlap
